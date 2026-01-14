@@ -1,0 +1,2 @@
+"""SynthID backend app package."""
+
