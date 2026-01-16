@@ -28,7 +28,7 @@ export default function ChatArea({ onTextGenerated, genConfig }) {
                 input_text: prompt,
             };
 
-            const data = await apiRequest('/api/generate', {
+            const data = await apiRequest('/api/generations', {
                 method: 'POST',
                 body: JSON.stringify(requestBody),
             });

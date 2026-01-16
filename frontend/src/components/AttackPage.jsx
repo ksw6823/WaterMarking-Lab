@@ -29,8 +29,8 @@ export default function AttackPage({ history = [], attackType, onAnalyzeComplete
 
         try {
             // 1. 엔드포인트 설정
-            // POST /api/attack/{generation_id}
-            const endpoint = `/api/attack/${selectedItem.id}`;
+            // POST /api/generations/{generation_id}/attacks
+            const endpoint = `/api/generations/${selectedItem.id}/attacks`;
 
             const requestBody = {
                 attack_type: attackType,       // "deletion", "substitution", "summarization"

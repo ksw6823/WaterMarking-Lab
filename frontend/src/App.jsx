@@ -30,13 +30,8 @@ function App() {
         watermark_key: "secret_key_123"
     });
 
-    // 앱 실행 시 초기 데이터 로드
-    useEffect(() => {
-        fetchInitialHistory();
-    }, []);
-
     // API를 통해 최신 생성 기록 가져오기
-    const fetchInitialHistory = async () => {
+    async function fetchInitialHistory() {
         try {
             const data = await apiRequest('/api/generations?page=1&page_size=20');
 
@@ -52,7 +47,13 @@ function App() {
         } catch (error) {
             console.error("Failed to load history:", error);
         }
-    };
+    }
+
+    // 앱 실행 시 초기 데이터 로드
+    useEffect(() => {
+        // eslint-disable-next-line react-hooks/set-state-in-effect
+        fetchInitialHistory();
+    }, []);
 
     // 텍스트 생성 후 리스트 갱신
     const handleTextGenerated = () => {

@@ -11,7 +11,7 @@ export default function VerificationPage({ onAnalyzeComplete }) {
         setStatus('analyzing');
 
         try {
-            const endpoint = `/api/detect/${inputId}`;
+            const endpoint = `/api/generations/${inputId}/detections`;
             console.log(`검증 요청: ${endpoint}`);
 
             const data = await apiRequest(endpoint, {
