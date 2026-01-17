@@ -20,11 +20,39 @@ export default function Sidebar({
         });
     };
 
+    // 기존 설정 업데이트 함수 (버튼/슬라이더용)
     const updateConfig = (key, value, isNumber = false) => {
+        let newValue = isNumber ? parseFloat(value) : value;
+        if (isNumber && isNaN(newValue)) newValue = 0;
+
         onConfigChange({
             ...genConfig,
-            [key]: isNumber ? parseFloat(value) : value
+            [key]: newValue
         });
+    };
+
+    // ✨ [신규] 입력창 전용 변경 함수 (입력 중)
+    // 지웠을 때 0이 되지 않고 '빈칸'이 되도록 허용합니다.
+    const handleNumChange = (key, value) => {
+        if (value === '') {
+            // 빈 문자열을 그대로 상태에 반영 (화면에서 지워짐)
+            onConfigChange({ ...genConfig, [key]: '' });
+        } else {
+            // 값이 있으면 숫자로 변환해서 반영
+            updateConfig(key, value, true);
+        }
+    };
+
+    // ✨ [신규] 입력창 포커스 아웃 함수 (입력 완료)
+    // 밖을 클릭했을 때 빈칸이면 0(기본값)으로 채워줍니다.
+    const handleBlur = (key) => {
+        const value = genConfig[key];
+        // 값이 없거나(빈칸) 숫자가 아닌 경우 0으로 초기화
+        if (value === '' || value === null || isNaN(parseFloat(value))) {
+            // Top-k는 보통 1 이상이므로 0보다는 1이나 40 같은 기본값이 나을 수도 있지만,
+            // 요청하신 대로 0(혹은 현재 로직상 최소값)으로 처리합니다.
+            updateConfig(key, 0, true);
+        }
     };
 
     const getTabClass = (id) => `
@@ -63,14 +91,13 @@ export default function Sidebar({
                 </div>
             </div>
 
-            {/* 3. 설정 컨트롤 영역 (스크롤 가능) */}
+            {/* 3. 설정 컨트롤 영역 */}
             <div className="flex-1 overflow-y-auto px-6 py-2 space-y-8 scrollbar-hide">
 
-                {/* ✨ CASE A: 오직 '생성(Generate)' 탭일 때만 보이는 설정들 ✨ */}
                 {activeTab === 'generate' && (
                     <div className="animate-in fade-in slide-in-from-left-2 duration-300 space-y-8">
 
-                        {/* 1. Target Model (이제 생성 탭에서만 보임!) */}
+                        {/* Target Model */}
                         <section>
                             <label className="text-[11px] font-bold text-gray-400 uppercase mb-3 flex items-center gap-1.5 tracking-wider">
                                 <Cpu size={12} /> Target Model
@@ -88,7 +115,7 @@ export default function Sidebar({
                             </div>
                         </section>
 
-                        {/* 2. Quantization */}
+                        {/* Quantization */}
                         <section>
                             <label className="text-[11px] font-bold text-gray-400 uppercase mb-3 flex items-center gap-1.5 tracking-wider">
                                 <Settings size={12} /> Quantization
@@ -109,46 +136,72 @@ export default function Sidebar({
                             </div>
                         </section>
 
-                        {/* 3. Sampling Params */}
-                        <section className="space-y-5">
+                        {/* Sampling Params */}
+                        <section className="space-y-6">
                             <label className="text-[11px] font-bold text-gray-400 uppercase mb-3 flex items-center gap-1.5 tracking-wider">
                                 <Activity size={12} /> Sampling Params
                             </label>
 
+                            {/* 1. Temperature */}
                             <div className="group">
-                                <div className="flex justify-between text-xs mb-2 font-medium text-gray-600">
-                                    <span>Temperature</span>
-                                    <span className="bg-gray-100 px-1.5 py-0.5 rounded text-gray-900">{genConfig.temperature}</span>
+                                <div className="flex justify-between items-center mb-2">
+                                    <span className="text-xs font-medium text-gray-600">Temperature</span>
+                                    <input
+                                        type="number"
+                                        min="0" max="1" step="0.1"
+                                        value={genConfig.temperature}
+                                        // ✨ onChange: 입력 중엔 빈칸 허용
+                                        onChange={(e) => handleNumChange('temperature', e.target.value)}
+                                        // ✨ onBlur: 나가면 0으로 복구
+                                        onBlur={() => handleBlur('temperature')}
+                                        className="w-14 text-center bg-gray-50 border border-gray-200 rounded text-xs font-bold text-gray-900 py-1 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none"
+                                    />
                                 </div>
                                 <input
                                     type="range" min="0" max="1" step="0.1"
-                                    value={genConfig.temperature}
+                                    value={Number(genConfig.temperature) || 0} // 빈 문자열일 때 슬라이더는 0 위치로
                                     onChange={(e) => updateConfig('temperature', e.target.value, true)}
                                     className="w-full accent-indigo-600 h-1.5 bg-gray-200 rounded-lg cursor-pointer"
                                 />
                             </div>
 
+                            {/* 2. Top-k */}
                             <div className="group">
-                                <div className="flex justify-between text-xs mb-2 font-medium text-gray-600">
-                                    <span>Top-k</span>
-                                    <span className="bg-gray-100 px-1.5 py-0.5 rounded text-gray-900">{genConfig.top_k}</span>
+                                <div className="flex justify-between items-center mb-2">
+                                    <span className="text-xs font-medium text-gray-600">Top-k</span>
+                                    <input
+                                        type="number"
+                                        min="0" max="100" step="1"
+                                        value={genConfig.top_k}
+                                        onChange={(e) => handleNumChange('top_k', e.target.value)}
+                                        onBlur={() => handleBlur('top_k')}
+                                        className="w-14 text-center bg-gray-50 border border-gray-200 rounded text-xs font-bold text-gray-900 py-1 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none"
+                                    />
                                 </div>
                                 <input
                                     type="range" min="1" max="100"
-                                    value={genConfig.top_k}
+                                    value={Number(genConfig.top_k) || 0}
                                     onChange={(e) => updateConfig('top_k', e.target.value, true)}
                                     className="w-full accent-indigo-600 h-1.5 bg-gray-200 rounded-lg cursor-pointer"
                                 />
                             </div>
 
+                            {/* 3. Top-p */}
                             <div className="group">
-                                <div className="flex justify-between text-xs mb-2 font-medium text-gray-600">
-                                    <span>Top-p</span>
-                                    <span className="bg-gray-100 px-1.5 py-0.5 rounded text-gray-900">{genConfig.top_p}</span>
+                                <div className="flex justify-between items-center mb-2">
+                                    <span className="text-xs font-medium text-gray-600">Top-p</span>
+                                    <input
+                                        type="number"
+                                        min="0" max="1" step="0.05"
+                                        value={genConfig.top_p}
+                                        onChange={(e) => handleNumChange('top_p', e.target.value)}
+                                        onBlur={() => handleBlur('top_p')}
+                                        className="w-14 text-center bg-gray-50 border border-gray-200 rounded text-xs font-bold text-gray-900 py-1 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none"
+                                    />
                                 </div>
                                 <input
                                     type="range" min="0" max="1" step="0.05"
-                                    value={genConfig.top_p}
+                                    value={Number(genConfig.top_p) || 0}
                                     onChange={(e) => updateConfig('top_p', e.target.value, true)}
                                     className="w-full accent-indigo-600 h-1.5 bg-gray-200 rounded-lg cursor-pointer"
                                 />
@@ -157,7 +210,7 @@ export default function Sidebar({
                     </div>
                 )}
 
-                {/* ✨ CASE B: 오직 '공격(Attack)' 탭일 때만 보이는 설정 ✨ */}
+                {/* 공격 전략 선택 */}
                 {activeTab === 'attack' && (
                     <section className="animate-in fade-in slide-in-from-left-2 duration-300">
                         <label className="text-[11px] font-bold text-gray-400 uppercase mb-3 flex items-center gap-1.5 tracking-wider">
@@ -200,7 +253,7 @@ export default function Sidebar({
                 <div className="h-4"></div>
             </div>
 
-            {/* 4. 워터마크 토글 (역시 생성 탭에서만 보임) */}
+            {/* 4. 워터마크 토글 */}
             {activeTab === 'generate' && (
                 <div className="p-6 border-t border-gray-100 bg-white flex-none animate-in fade-in slide-in-from-bottom-2 duration-300">
                     <div className={`p-4 rounded-2xl border transition-all duration-300 ${genConfig.watermark_enabled ? 'bg-indigo-50 border-indigo-100' : 'bg-gray-50 border-gray-200'}`}>

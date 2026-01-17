@@ -1,21 +1,18 @@
 import { useState, useEffect } from 'react';
 import Sidebar from './components/Sidebar';
 import ChatArea from './components/ChatArea';
-import DashboardPanel from './components/DashboardPanel';
 import VerificationPage from './components/VerificationPage';
 import AttackPage from './components/AttackPage';
 import HistoryPage from './components/HistoryPage';
-import { BarChart2 } from 'lucide-react';
 import { apiRequest } from './utils/api';
 
 function App() {
-    const [isDashboardOpen, setIsDashboardOpen] = useState(false);
+    // 1. 탭 및 데이터 상태 관리
     const [activeTab, setActiveTab] = useState('generate');
-    const [dashboardData, setDashboardData] = useState(null);
     const [currentAttackType, setCurrentAttackType] = useState('deletion');
     const [generatedHistory, setGeneratedHistory] = useState([]);
 
-    // 생성 설정값 (기본값)
+    // 2. 생성 설정값 (기본값)
     const [genConfig, setGenConfig] = useState({
         model: "Llama-3-8B",
         quantization: "4-bit",
@@ -30,17 +27,17 @@ function App() {
         watermark_key: "secret_key_123"
     });
 
-    // API를 통해 최신 생성 기록 가져오기
+    // 3. API를 통해 최신 생성 기록 가져오기 (공격 페이지 등에서 사용)
     async function fetchInitialHistory() {
         try {
             const data = await apiRequest('/api/generations?page=1&page_size=20');
 
             const mappedData = data.items.map(item => ({
                 id: item.generation_id,
-                text: item.input_text,
+                text: item.input_text, // 사이드바 요약용으로 질문(Prompt) 사용
                 date: item.created_at,
                 model: item.model,
-                ...item
+                ...item // 나머지 필드도 포함
             }));
 
             setGeneratedHistory(mappedData);
@@ -51,25 +48,18 @@ function App() {
 
     // 앱 실행 시 초기 데이터 로드
     useEffect(() => {
-        // eslint-disable-next-line react-hooks/set-state-in-effect
         fetchInitialHistory();
     }, []);
 
-    // 텍스트 생성 후 리스트 갱신
+    // 텍스트 생성 후 리스트 갱신 (ChatArea에서 호출)
     const handleTextGenerated = () => {
         fetchInitialHistory();
-    };
-
-    // 분석 완료 후 대시보드 열기
-    const handleAnalysisComplete = (resultData) => {
-        setDashboardData(resultData);
-        setIsDashboardOpen(true);
     };
 
     return (
         <div className="flex h-screen w-full bg-white text-slate-900 overflow-hidden font-sans">
 
-            {/* 1. 사이드바 */}
+            {/* 1. 사이드바 (설정 및 메뉴) */}
             <Sidebar
                 activeTab={activeTab}
                 onTabChange={setActiveTab}
@@ -80,22 +70,11 @@ function App() {
                 recentHistory={generatedHistory}
             />
 
-            {/* 2. 메인 영역 */}
+            {/* 2. 메인 컨텐츠 영역 */}
             <main className="flex-1 flex flex-col h-full relative min-w-0 bg-gray-50/30 transition-all duration-200">
-
-                {!isDashboardOpen && (
-                    <div className="absolute top-6 right-8 z-20">
-                        <button
-                            onClick={() => setIsDashboardOpen(true)}
-                            className="flex items-center gap-2 px-5 py-2.5 bg-white border border-gray-200 text-gray-600 rounded-full shadow-sm hover:shadow-md hover:text-indigo-600 transition-all font-bold"
-                        >
-                            <BarChart2 size={20} />
-                            <span>대시보드 열기</span>
-                        </button>
-                    </div>
-                )}
-
                 <div className="flex-1 overflow-y-auto relative w-full">
+
+                    {/* (A) 텍스트 생성 탭 */}
                     {activeTab === 'generate' && (
                         <ChatArea
                             onTextGenerated={handleTextGenerated}
@@ -103,33 +82,25 @@ function App() {
                         />
                     )}
 
+                    {/* (B) 워터마크 검증 탭 */}
                     {activeTab === 'verify' && (
-                        <VerificationPage onAnalyzeComplete={handleAnalysisComplete} />
+                        <VerificationPage />
                     )}
 
+                    {/* (C) 공격 시뮬레이션 탭 */}
                     {activeTab === 'attack' && (
                         <AttackPage
                             history={generatedHistory}
                             attackType={currentAttackType}
-                            onAnalyzeComplete={handleAnalysisComplete}
                         />
                     )}
 
-                    {activeTab === 'history' && <HistoryPage />}
+                    {/* (D) 전체 이력 조회 탭 */}
+                    {activeTab === 'history' && (
+                        <HistoryPage />
+                    )}
                 </div>
             </main>
-
-            {/* 3. 대시보드 패널 */}
-            {isDashboardOpen && (
-                <div className="w-[900px] h-full bg-white border-l border-gray-200 shadow-2xl z-30 flex-none">
-                    <DashboardPanel
-                        isOpen={isDashboardOpen}
-                        onClose={() => setIsDashboardOpen(false)}
-                        data={dashboardData}
-                    />
-                </div>
-            )}
-
         </div>
     );
 }

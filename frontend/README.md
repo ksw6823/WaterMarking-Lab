@@ -98,3 +98,28 @@ npm run dev
 `src/index.css`에 남아있던 Vite 기본 템플릿 전역 스타일(특히 `button { background-color: #1a1a1a; }`, `:root { color-scheme: light dark; ... }`)이 Tailwind UI를 덮어써서 버튼이 검정으로 보였습니다.
 
 - 해결: 전역 템플릿 스타일을 제거하고, 레이아웃에 필요한 `body`, `#root`만 유지했습니다.
+
+# Frontend (React + Vite)
+
+이 폴더는 **React + Vite** 프론트엔드입니다. 백엔드(FastAPI)와 **동시에 실행**하면, 프론트가 `/api/**` 요청을 백엔드로 프록시하여 API를 테스트할 수 있습니다.
+
+## 사전 요구사항 (Prerequisites)
+- **Node.js**: v18 이상 권장
+- **Backend 실행**: 프론트엔드 실행 전, 백엔드 서버가 `http://localhost:8000`에서 실행 중이어야 합니다.
+
+## 실행 방법 (Windows / PowerShell 기준)
+
+### 1. 패키지 설치
+최초 실행 시 의존성 패키지를 설치해야 합니다.
+
+```powershell
+cd frontend
+npm install
+```
+
+### 2. 개발 서버 실행
+```powershell
+npm run dev
+```
+
+
