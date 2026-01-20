@@ -1,4 +1,26 @@
 services:
+  app:
+    build: .
+    container_name: synthid-backend
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql+psycopg://postgres:postgres@db:5432/synthid
+      - HF_HOME=/root/.cache/huggingface
+    volumes:
+      - .:/app
+      - ~/.cache/huggingface:/root/.cache/huggingface
+    depends_on:
+      db:
+        condition: service_healthy
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
   db:
     image: postgres:16
     container_name: synthid-postgres

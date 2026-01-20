@@ -13,7 +13,8 @@ from app.schemas.attacks import AttackCreate
 from app.schemas.common import Page
 from app.schemas.detections import DetectionOut
 from app.schemas.generations import GenerationCreate, GenerationListItem, GenerationOut
-from app.services.ai_stub import attack_text, detect_text, generate_text
+from app.services.ai import attack_text, detect_text, generate_text
+import sacrebleu
 
 router = APIRouter()
 
@@ -134,7 +135,23 @@ async def create_detection(generation_id: int, db: Session = Depends(get_db)) ->
     if gen is None:
         raise HTTPException(status_code=404, detail="Generation not found")
 
-    result = await detect_text(gen.output_text, gen.watermark_key, {"model": gen.model})
+    # Calculate BLEU if this is an attacked/modified text
+    bleu_score = None
+    if gen.original_id:
+        original = db.get(Generation, gen.original_id)
+        if original:
+             # BLEU expects a list of reference strings
+            bleu_score = sacrebleu.sentence_bleu(gen.output_text, [original.output_text]).score
+
+    result = await detect_text(
+        gen.output_text,
+        gen.watermark_key,
+        {
+            "model": gen.model,
+            "g_value": gen.g_value,
+            "tournament_size": gen.tournament_size,
+        }
+    )
 
     row = Detection(
         generation_id=gen.generation_id,
@@ -146,7 +163,7 @@ async def create_detection(generation_id: int, db: Session = Depends(get_db)) ->
         true_positive_rate=result.get("true_positive_rate"),
         false_positive_rate=result.get("false_positive_rate"),
         roc_auc=result.get("roc_auc"),
-        bleu_score=result.get("bleu_score"),
+        bleu_score=bleu_score,
     )
     db.add(row)
     db.commit()

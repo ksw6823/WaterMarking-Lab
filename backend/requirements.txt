@@ -6,4 +6,12 @@ python-dotenv>=1.0
 alembic>=1.13
 pytest>=8.0
 httpx>=0.27
+torch
+transformers
+accelerate
+huggingface_hub
+synthid-text
+scipy
+numpy
+sacrebleu
 
