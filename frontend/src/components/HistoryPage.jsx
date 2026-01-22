@@ -4,9 +4,9 @@ import {
     CheckCircle, AlertTriangle, X,
     Loader2, ChevronLeft, ChevronRight,
     Cpu, Zap, Settings2, BarChart3, CheckCircle2, XCircle,
-    TrendingUp, User, MessageSquare, Trash2
+    TrendingUp, User, MessageSquare, Trash2, Calendar
 } from 'lucide-react';
-import { apiRequest } from '../utils/api'; // 경로는 실제 프로젝트에 맞게 확인해주세요.
+import { apiRequest } from '../utils/api';
 
 const PAGE_SIZE = 10;
 
@@ -24,7 +24,14 @@ const safeDate = (d) => {
 
 const norm = (v) => (v ?? '').toString().toLowerCase().trim();
 
-// --- [하위 컴포넌트 분리 (성능 최적화)] ---
+// 숫자 예쁘게
+const fmt = (v, digits = 2) => {
+    const n = Number(v);
+    if (!Number.isFinite(n)) return '0';
+    return n.toFixed(digits);
+};
+
+// --- [하위 컴포넌트] ---
 
 // 1. 페이지네이션
 const MiniPagination = ({ currentPage, totalCount, setPage }) => {
@@ -39,8 +46,8 @@ const MiniPagination = ({ currentPage, totalCount, setPage }) => {
                 <ChevronLeft size={14} />
             </button>
             <span className="text-[10px] text-gray-500 font-bold px-1">
-                {currentPage}/{maxPage}
-            </span>
+        {currentPage}/{maxPage}
+      </span>
             <button
                 onClick={() => setPage(p => Math.min(maxPage, p + 1))}
                 disabled={currentPage === maxPage}
@@ -82,27 +89,34 @@ const CircleChart = ({ percent, color }) => {
     );
 };
 
-// 3. 바 그래프 (Statistical Metrics)
-const BarGraph = ({ label, value, max = 100, color = "bg-indigo-500", desc, valColor = "text-gray-800" }) => (
-    <div className="mb-8 last:mb-0">
-        <div className="flex justify-between items-end mb-3">
-            <div className="flex flex-col">
-                <span className="text-base font-bold text-gray-700">{label}</span>
-                <span className="text-xs font-medium text-gray-400">{desc}</span>
+// 3. 바 그래프 (Statistical Metrics) - 값/폭 안정화
+const BarGraph = ({ label, value, max = 100, color = "bg-indigo-500", desc, valColor = "text-gray-800", digits = 2, suffix = "" }) => {
+    const num = Number(value ?? 0);
+    const safeNum = Number.isFinite(num) ? num : 0;
+    const pct = max > 0 ? Math.min((safeNum / max) * 100, 100) : 0;
+
+    return (
+        <div className="mb-6 last:mb-0">
+            <div className="flex justify-between items-end mb-2">
+                <div className="flex flex-col">
+                    <span className="text-sm font-bold text-gray-700">{label}</span>
+                    <span className="text-[11px] font-medium text-gray-400">{desc}</span>
+                </div>
+                <span className={`text-base font-black ${valColor}`}>
+          {fmt(safeNum, digits)}{suffix}
+        </span>
             </div>
-            <span className={`text-xl font-black ${valColor}`}>{value}</span>
+            <div className="w-full bg-gray-100 rounded-full h-4">
+                <div
+                    className={`h-4 rounded-full ${color} shadow-sm transition-all duration-700 ease-out`}
+                    style={{ width: `${pct}%` }}
+                />
+            </div>
         </div>
-        <div className="w-full bg-gray-100 rounded-full h-5">
-            <div
-                className={`h-5 rounded-full ${color} shadow-sm transition-all duration-1000 ease-out`}
-                style={{ width: `${Math.min((value / max) * 100, 100)}%` }}
-            />
-        </div>
-    </div>
-);
+    );
+};
 
-
-// --- [메인 페이지 컴포넌트] ---
+// --- [메인 페이지] ---
 export default function HistoryPage() {
     // --- [Left Panel] 생성(Generation) 상태 ---
     const [genSearchTerm, setGenSearchTerm] = useState('');
@@ -116,7 +130,33 @@ export default function HistoryPage() {
     const [genPage, setGenPage] = useState(1);
     const [genTotal, setGenTotal] = useState(0);
     const [isLoadingGen, setIsLoadingGen] = useState(false);
-    const [refreshGen, setRefreshGen] = useState(0); // 리스트 새로고침 트리거
+    const [refreshGen, setRefreshGen] = useState(0);
+
+    // 단일 항목 삭제(생성)
+    const [deletingGenId, setDeletingGenId] = useState(null);
+
+    const handleDeleteGen = async (id) => {
+        const ok = window.confirm("삭제하시겠습니까?");
+        if (!ok) return;
+
+        setDeletingGenId(id);
+        try {
+            await apiRequest(`/api/generations/${id}`, { method: "DELETE" });
+
+            setGenHistory((prev) => prev.filter((x) => x.generation_id !== id));
+            setGenTotal((t) => Math.max(0, t - 1));
+
+            // 모달 열려있던게 삭제된 경우 닫기
+            if (selectedItem?.type === 'generation' && selectedItem?.generation_id === id) {
+                setSelectedItem(null);
+            }
+        } catch (e) {
+            console.error(e);
+            alert("삭제 실패");
+        } finally {
+            setDeletingGenId(null);
+        }
+    };
 
     // --- [Right Panel] 검증(Detection) 상태 ---
     const [detSearchTerm, setDetSearchTerm] = useState('');
@@ -129,10 +169,34 @@ export default function HistoryPage() {
     const [detPage, setDetPage] = useState(1);
     const [detTotal, setDetTotal] = useState(0);
     const [isLoadingDet, setIsLoadingDet] = useState(false);
+    const [deletingDetId, setDeletingDetId] = useState(null);
 
     // 상세 모달용
     const [selectedItem, setSelectedItem] = useState(null);
     const [isModalLoading, setIsModalLoading] = useState(false);
+
+    const handleDeleteDet = async (id) => {
+        const ok = window.confirm("검증 기록을 삭제하시겠습니까?");
+        if (!ok) return;
+
+        setDeletingDetId(id);
+        try {
+            await apiRequest(`/api/detections/${id}`, { method: "DELETE" });
+
+            setDetHistory((prev) => prev.filter((x) => x.detection_id !== id));
+            setDetTotal((t) => Math.max(0, t - 1));
+
+            // 모달 열려있던게 삭제된 경우 닫기
+            if (selectedItem?.type === 'detection' && selectedItem?.detection_id === id) {
+                setSelectedItem(null);
+            }
+        } catch (e) {
+            console.error(e);
+            alert("삭제 실패");
+        } finally {
+            setDeletingDetId(null);
+        }
+    };
 
     // ESC 키로 모달 닫기
     useEffect(() => {
@@ -157,7 +221,7 @@ export default function HistoryPage() {
                 const data = await apiRequest(`/api/generations?${params.toString()}`);
 
                 let filteredItems = data.items || [];
-                // API에서 타입 필터링을 지원하지 않는 경우 프론트에서 2차 필터링 (필요 시 유지)
+
                 if (genType === 'GEN') {
                     filteredItems = filteredItems.filter(item => !item.attack_type && item.type !== 'attack');
                 } else if (genType === 'ATTACK') {
@@ -184,7 +248,6 @@ export default function HistoryPage() {
                 const data = await apiRequest(`/api/detections?${params.toString()}`);
                 let rawItems = data.items || [];
 
-                // generation 정보를 붙여서 필터 가능하게 만들기 (Enrichment)
                 const enrichedItems = await Promise.all(
                     rawItems.map(async (item) => {
                         try {
@@ -200,25 +263,24 @@ export default function HistoryPage() {
                 const filteredItems = enrichedItems.filter(item => {
                     const gen = item.genInfo || {};
 
-                    // 1) Verdict 필터
                     if (detVerdict !== 'ALL') {
                         const wantDetected = detVerdict === 'DETECTED';
                         if ((item.is_watermarked ?? false) !== wantDetected) return false;
                     }
-                    // 2) Attack Context 필터
+
                     if (detAttack !== 'ALL') {
                         const isAttacked = !!gen.attack_type || gen.type === 'attack';
                         const wantAttacked = detAttack === 'ATTACKED';
                         if (isAttacked !== wantAttacked) return false;
                     }
-                    // 3) Confidence 필터
+
                     if (detConfidence !== 'ALL') {
                         const score = Number(item.confidence ?? 0);
                         if (detConfidence === 'HIGH' && score < 0.8) return false;
                         if (detConfidence === 'MID' && (score < 0.5 || score >= 0.8)) return false;
                         if (detConfidence === 'LOW' && score >= 0.5) return false;
                     }
-                    // 4) Model 필터
+
                     if (detModel !== 'ALL') {
                         if (gen.model !== detModel) return false;
                     }
@@ -297,7 +359,7 @@ export default function HistoryPage() {
 
     // --- [모달 렌더러 1] Generation 상세 ---
     const renderGenerationDetail = (data) => (
-        <div className="flex gap-8 h-full">
+        <div className="flex gap-8 h-full min-h-0">
             <div className="w-1/4 bg-gray-50 rounded-3xl p-6 border border-gray-200 flex flex-col gap-6 h-full overflow-y-auto">
                 <h4 className="text-sm font-black text-gray-500 flex items-center gap-2 pb-3 border-b border-gray-200">
                     <Settings2 size={18} /> GENERATION CONFIG
@@ -343,9 +405,9 @@ export default function HistoryPage() {
 
                     {(data.attack_type || data.type === 'attack') && (
                         <div className="mt-auto bg-red-100 border border-red-200 p-5 rounded-2xl">
-                            <span className="text-xs font-bold text-red-500 block mb-2 flex items-center gap-1">
-                                <AlertTriangle size={14} /> ATTACK INFO
-                            </span>
+              <span className="text-xs font-bold text-red-500 block mb-2 flex items-center gap-1">
+                <AlertTriangle size={14} /> ATTACK INFO
+              </span>
                             <div className="text-xl font-black text-red-800 mb-1">{data.attack_type}</div>
                             <div className="text-sm font-bold text-red-600">Intensity: {data.attack_intensity}%</div>
                         </div>
@@ -353,12 +415,12 @@ export default function HistoryPage() {
                 </div>
             </div>
 
-            <div className="flex-1 flex flex-col gap-6 h-full">
-                <div className="bg-white p-6 rounded-3xl border border-gray-200 shadow-sm flex flex-col max-h-[30%]">
+            <div className="flex-1 flex flex-col gap-6 h-full min-h-0">
+                <div className="bg-white p-6 rounded-3xl border border-gray-200 shadow-sm flex flex-col max-h-[30%] min-h-0">
                     <h5 className="text-xs font-bold text-gray-400 uppercase mb-3 flex items-center gap-2">
                         <User size={16} /> Input Prompt
                     </h5>
-                    <div className="flex-1 overflow-y-auto p-4 bg-gray-50 rounded-xl text-sm text-gray-700 leading-relaxed border border-gray-100">
+                    <div className="flex-1 overflow-y-auto p-4 bg-gray-50 rounded-xl text-sm text-gray-700 leading-relaxed border border-gray-100 min-h-0">
                         {data.input_text}
                     </div>
                 </div>
@@ -367,23 +429,22 @@ export default function HistoryPage() {
                     <h5 className="text-xs font-bold text-indigo-500 uppercase mb-3 flex items-center gap-2">
                         <MessageSquare size={16} /> Generated Output
                     </h5>
-                    <div className="flex-1 overflow-y-auto p-6 bg-indigo-50/30 rounded-xl text-sm text-gray-800 leading-relaxed border border-indigo-100 shadow-inner font-mono whitespace-pre-wrap">
+                    <div className="flex-1 overflow-y-auto p-6 bg-indigo-50/30 rounded-xl text-sm text-gray-800 leading-relaxed border border-indigo-100 shadow-inner font-mono whitespace-pre-wrap min-h-0">
                         {data.output_text}
                     </div>
                 </div>
-                
+
                 {data.type === 'generation' && (
-                     <div className="flex justify-end">
-                        <button 
+                    <div className="flex justify-end">
+                        <button
                             onClick={async () => {
-                                if(window.confirm("정말로 삭제하시겠습니까? 관련 데이터도 함께 삭제될 수 있습니다.")) {
+                                if (window.confirm("정말로 삭제하시겠습니까? 관련 데이터도 함께 삭제될 수 있습니다.")) {
                                     try {
                                         await apiRequest(`/api/generations/${data.generation_id}`, { method: 'DELETE' });
                                         alert("삭제되었습니다.");
                                         setSelectedItem(null);
-                                        // 리스트 갱신 (트리거)
                                         setRefreshGen(n => n + 1);
-                                    } catch(e) {
+                                    } catch (e) {
                                         alert("삭제 실패: " + e.message);
                                     }
                                 }
@@ -392,7 +453,7 @@ export default function HistoryPage() {
                         >
                             <Trash2 size={16} /> Delete Record
                         </button>
-                     </div>
+                    </div>
                 )}
             </div>
         </div>
@@ -404,8 +465,13 @@ export default function HistoryPage() {
         const isDetected = !!data.is_watermarked;
         const confPct = toPercent(data.confidence);
 
+        const z = Number(data.z_score ?? 0);
+        const pInv = data.p_value != null ? (1 - Number(data.p_value)) * 100 : 0;
+        const tpr = data.true_positive_rate != null ? Number(data.true_positive_rate) * 100 : 0;
+        const fpr = data.false_positive_rate != null ? Number(data.false_positive_rate) * 100 : 0;
+
         return (
-            <div className="flex gap-8 h-full">
+            <div className="flex gap-8 h-full min-h-0">
                 {/* 왼쪽: 설정 요약 */}
                 <div className="w-[300px] flex-none bg-gray-50/50 rounded-3xl p-6 border border-gray-200 flex flex-col gap-6 h-full overflow-y-auto">
                     <h4 className="text-sm font-black text-gray-500 flex items-center gap-2 pb-3 border-b border-gray-200 sticky top-0 bg-gray-50/50 backdrop-blur-sm z-10">
@@ -420,9 +486,9 @@ export default function HistoryPage() {
                                     <Cpu size={20} className="text-indigo-500" /> {gen.model || 'Unknown'}
                                 </div>
                                 <div className="flex gap-2">
-                                    <span className="text-[10px] font-bold text-orange-600 bg-orange-50 px-2 py-1 rounded border border-orange-100 flex items-center gap-1">
-                                        <Zap size={10} /> {gen.quantization || '4-bit'}
-                                    </span>
+                  <span className="text-[10px] font-bold text-orange-600 bg-orange-50 px-2 py-1 rounded border border-orange-100 flex items-center gap-1">
+                    <Zap size={10} /> {gen.quantization || '4-bit'}
+                  </span>
                                 </div>
                             </div>
                         </div>
@@ -455,17 +521,17 @@ export default function HistoryPage() {
 
                         {(gen.attack_type || gen.type === 'attack') && (
                             <div className="bg-red-50 rounded-2xl border border-red-100 p-5 mt-4">
-                                <span className="text-[10px] font-bold text-red-400 block mb-2 flex items-center gap-1 uppercase tracking-wider">
-                                    <AlertTriangle size={12} /> Attack Info
-                                </span>
+                <span className="text-[10px] font-bold text-red-400 block mb-2 flex items-center gap-1 uppercase tracking-wider">
+                  <AlertTriangle size={12} /> Attack Info
+                </span>
                                 <div className="text-xl font-black text-red-800 mb-1 capitalize">{gen.attack_type}</div>
                             </div>
                         )}
                     </div>
                 </div>
 
-                {/* 오른쪽: 검증 결과 차트 및 텍스트 */}
-                <div className="flex-1 flex flex-col gap-6 h-full overflow-y-auto pr-2 pb-4">
+                {/* 오른쪽: 결과 영역 */}
+                <div className="flex-1 flex flex-col gap-6 h-full min-h-0">
                     <div className={`rounded-3xl p-8 flex items-center justify-between border shadow-sm transition-all ${isDetected ? 'bg-gradient-to-r from-green-50 to-white border-green-200' : 'bg-gradient-to-r from-red-50 to-white border-red-200'}`}>
                         <div className="flex items-center gap-6">
                             <div className={`p-5 rounded-2xl shadow-sm ${isDetected ? 'bg-green-100 text-green-600' : 'bg-red-100 text-red-600'}`}>
@@ -482,32 +548,72 @@ export default function HistoryPage() {
                         </div>
                     </div>
 
-                    <div className="flex-1 grid grid-cols-2 gap-6 min-h-[400px]">
-                        <div className="bg-white p-8 rounded-3xl border border-gray-200 shadow-sm flex flex-col items-center justify-center relative overflow-hidden">
-                            <div className={`absolute top-0 w-full h-2 ${isDetected ? 'bg-green-400' : 'bg-red-400'}`} />
-                            <h5 className="text-xs font-bold text-gray-400 uppercase mb-8 flex items-center gap-2 w-full justify-center">
+                    {/* ✅ 여기: 2열 카드가 잘리는 문제 해결 (min-h-0 + 각 카드 min-h-0 + 오른쪽 스크롤) */}
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 flex-1 min-h-0">
+                        {/* Confidence 카드 */}
+                        <div className="bg-white p-8 rounded-3xl border border-gray-200 shadow-sm flex flex-col items-center justify-center relative overflow-hidden min-h-0">
+                            {/* ❌ 상단 색 줄 제거 */}
+                            <h5 className="text-xs font-bold text-gray-400 uppercase mb-6 flex items-center gap-2 w-full justify-center">
                                 <TrendingUp size={16} /> Confidence Analysis
                             </h5>
-                            <div className="flex-1 flex flex-col items-center justify-center scale-110">
+                            <div className="flex-1 flex flex-col items-center justify-center scale-110 min-h-0">
                                 <CircleChart percent={confPct} color={isDetected ? "#10b981" : "#ef4444"} />
                             </div>
                         </div>
 
-                        <div className="bg-white p-10 rounded-3xl border border-gray-200 shadow-sm flex flex-col justify-center relative overflow-hidden">
-                            <div className="absolute top-0 w-full h-2 bg-indigo-400" />
-                            <h5 className="text-xs font-bold text-gray-400 uppercase mb-10 flex items-center gap-2">
+                        {/* Statistical 카드 */}
+                        <div className="bg-white p-8 rounded-3xl border border-gray-200 shadow-sm flex flex-col relative overflow-hidden min-h-0">
+                            {/* ❌ 상단 색 줄 제거 */}
+                            <h5 className="text-xs font-bold text-gray-400 uppercase mb-6 flex items-center gap-2">
                                 <BarChart3 size={16} /> Key Statistical Metrics
                             </h5>
-                            <div className="flex flex-col gap-8 justify-center h-full">
-                                <BarGraph label="Z-Score" desc="Statistical Distance" value={data.z_score ?? 0} max={10} color="bg-purple-500" valColor="text-purple-600" />
-                                <BarGraph label="P-Value (Inv)" desc="Significance Level" value={data.p_value != null ? (1 - data.p_value) * 100 : 0} max={100} color="bg-teal-500" valColor="text-teal-600" />
-                                <BarGraph label="TPR" desc="True Positive Rate" value={data.true_positive_rate != null ? data.true_positive_rate * 100 : 0} max={100} color="bg-blue-500" valColor="text-blue-600" />
-                                <BarGraph label="FPR" desc="False Positive Rate" value={data.false_positive_rate != null ? data.false_positive_rate * 100 : 0} max={100} color="bg-red-400" valColor="text-red-600" />
+
+                            {/* ✅ 4개가 안 잘리도록: 스크롤 + 간격 줄이기 */}
+                            <div className="flex-1 min-h-0 overflow-y-auto pr-1">
+                                <BarGraph
+                                    label="Z-Score"
+                                    desc="Statistical Distance"
+                                    value={z}
+                                    max={10}
+                                    color="bg-purple-500"
+                                    valColor="text-purple-600"
+                                    digits={4}
+                                />
+                                <BarGraph
+                                    label="P-Value (Inv)"
+                                    desc="Significance Level"
+                                    value={pInv}
+                                    max={100}
+                                    color="bg-teal-500"
+                                    valColor="text-teal-600"
+                                    digits={2}
+                                    suffix="%"
+                                />
+                                <BarGraph
+                                    label="TPR"
+                                    desc="True Positive Rate"
+                                    value={tpr}
+                                    max={100}
+                                    color="bg-blue-500"
+                                    valColor="text-blue-600"
+                                    digits={2}
+                                    suffix="%"
+                                />
+                                <BarGraph
+                                    label="FPR"
+                                    desc="False Positive Rate"
+                                    value={fpr}
+                                    max={100}
+                                    color="bg-red-400"
+                                    valColor="text-red-600"
+                                    digits={2}
+                                    suffix="%"
+                                />
                             </div>
                         </div>
                     </div>
 
-                    <div className="bg-white p-6 rounded-3xl border border-gray-200 shadow-sm flex flex-col">
+                    <div className="bg-white p-6 rounded-3xl border border-gray-200 shadow-sm flex flex-col min-h-0">
                         <h5 className="text-xs font-bold text-gray-400 uppercase mb-3 flex items-center gap-2">
                             <FileText size={16} /> Verified Input Text
                         </h5>
@@ -545,8 +651,8 @@ export default function HistoryPage() {
                             <div className="flex items-center gap-2">
                                 <div className="p-1.5 bg-indigo-100 text-indigo-600 rounded-lg"><FileText size={16} /></div>
                                 <span className="font-bold text-gray-700 text-sm">
-                                    생성 기록 ({genShownCount}/{genTotal})
-                                </span>
+                  생성 기록 ({genShownCount}/{genTotal})
+                </span>
                             </div>
                             <MiniPagination currentPage={genPage} totalCount={genTotal} setPage={setGenPage} />
                         </div>
@@ -592,24 +698,59 @@ export default function HistoryPage() {
                             <div className="py-20 flex justify-center"><Loader2 className="animate-spin text-gray-400" size={32} /></div>
                         ) : filteredGenHistory.map((item) => {
                             const isAttack = item.type === 'attack' || item.attack_type;
+
                             return (
                                 <div
                                     key={item.generation_id}
-                                    onClick={() => openModal(item.generation_id, 'generation')}
-                                    className="group bg-white p-5 rounded-2xl border border-gray-200 hover:border-indigo-300 hover:shadow-md transition-all cursor-pointer"
+                                    onClick={() => {
+                                        if (deletingGenId) return;
+                                        openModal(item.generation_id, 'generation');
+                                    }}
+                                    className={`group bg-white p-5 rounded-2xl border border-gray-200 hover:border-indigo-300 hover:shadow-md transition-all cursor-pointer ${deletingGenId === item.generation_id ? 'opacity-70 cursor-wait' : ''}`}
                                 >
+                                    {/* ✅ 여기: 오른쪽에 X + 아래 날짜 */}
                                     <div className="flex justify-between items-start mb-2">
                                         <div className="flex items-center gap-1.5">
-                                            <span className="px-2 py-0.5 rounded-md bg-indigo-50 text-indigo-600 border border-indigo-100 text-[10px] font-bold font-mono">ID: {item.generation_id}</span>
+                      <span className="px-2 py-0.5 rounded-md bg-indigo-50 text-indigo-600 border border-indigo-100 text-[10px] font-bold font-mono">
+                        ID: {item.generation_id}
+                      </span>
                                             {isAttack ? (
                                                 <span className="px-1.5 py-0.5 rounded bg-red-50 text-red-600 text-[9px] font-black border border-red-100">ATTACK</span>
                                             ) : (
                                                 <span className="px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-600 text-[9px] font-black border border-indigo-100">GEN</span>
                                             )}
                                         </div>
-                                        <span className="text-[10px] text-gray-400">{safeDate(item.created_at)}</span>
+
+                                        <div className="flex flex-col items-end gap-2 shrink-0">
+                                            <button
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    handleDeleteGen(item.generation_id);
+                                                }}
+                                                disabled={deletingGenId === item.generation_id}
+                                                className={`w-7 h-7 rounded-full flex items-center justify-center transition
+                          ${deletingGenId === item.generation_id
+                                                    ? 'bg-gray-100 text-black cursor-wait'
+                                                    : 'bg-white text-black hover:bg-gray-100 border border-gray-200'}
+                        `}
+                                                title="삭제"
+                                            >
+                                                {deletingGenId === item.generation_id ? (
+                                                    <Loader2 className="animate-spin" size={14} />
+                                                ) : (
+                                                    <span className="text-[18px] leading-none font-semibold text-black" aria-hidden>×</span>
+                                                )}
+                                            </button>
+
+                                            <span className="text-[10px] text-gray-400 flex items-center gap-1">
+                        <Calendar size={12} /> {safeDate(item.created_at)}
+                      </span>
+                                        </div>
                                     </div>
-                                    <p className="text-sm font-bold text-gray-800 line-clamp-2 mb-2 group-hover:text-indigo-600">{item.input_text}</p>
+
+                                    <p className="text-sm font-bold text-gray-800 line-clamp-2 mb-2 group-hover:text-indigo-600">
+                                        {item.input_text}
+                                    </p>
                                     <div className="flex items-center gap-2 text-[10px] text-gray-400 border-t border-gray-50 pt-2">
                                         <Cpu size={12} /> {item.model}
                                         <span className="ml-auto text-[10px] text-gray-300 font-mono">{item.quantization || ''}</span>
@@ -672,25 +813,76 @@ export default function HistoryPage() {
                             return (
                                 <div
                                     key={item.detection_id}
-                                    onClick={() => openModal(item.detection_id, 'detection')}
-                                    className="group bg-white p-5 rounded-2xl border border-gray-200 hover:border-green-300 hover:shadow-md transition-all cursor-pointer"
+                                    onClick={() => {
+                                        if (deletingDetId) return;
+                                        openModal(item.detection_id, 'detection');
+                                    }}
+                                    className={`group bg-white p-5 rounded-2xl border border-gray-200 hover:border-green-300 hover:shadow-md transition-all cursor-pointer ${
+                                        deletingDetId === item.detection_id ? 'opacity-70 cursor-wait' : ''
+                                    }`}
                                 >
+                                    {/* 상단: 왼쪽 ID들 / 오른쪽 X + 날짜 */}
                                     <div className="flex justify-between items-start mb-3">
                                         <div className="flex items-center gap-2">
-                                            <span className="px-2.5 py-1 rounded-lg bg-green-50 text-green-700 border border-green-200 text-[10px] font-bold font-mono">ID: {item.detection_id}</span>
+      <span className="px-2.5 py-1 rounded-lg bg-green-50 text-green-700 border border-green-200 text-[10px] font-bold font-mono">
+        ID: {item.detection_id}
+      </span>
                                             <span className="flex items-center gap-1 px-2 py-1 rounded-lg bg-indigo-50 text-indigo-600 border border-indigo-200 text-[10px] font-bold">
-                                                <span className="text-indigo-400 text-[9px]">Ref:</span>
-                                                <span className="text-sm">{item.generation_id}</span>
-                                            </span>
+        <span className="text-indigo-400 text-[9px]">Ref:</span>
+        <span className="text-sm">{item.generation_id}</span>
+      </span>
+                                            <span className={`px-2 py-0.5 text-[9px] font-bold rounded-full border ${
+                                                detected ? 'bg-green-50 text-green-700 border-green-200' : 'bg-red-50 text-red-700 border-red-200'
+                                            }`}>
+        {detected ? 'Detected' : 'No WM'}
+      </span>
                                         </div>
-                                        <div className="flex flex-col items-end gap-2">
-                                            <span className="text-[10px] text-gray-400">{safeDate(item.created_at)}</span>
-                                            <span className={`px-2 py-0.5 text-[9px] font-bold rounded-full border ${detected ? 'bg-green-50 text-green-700 border-green-200' : 'bg-red-50 text-red-700 border-red-200'}`}>
-                                                {detected ? 'Detected' : 'No WM'}
-                                            </span>
+
+                                        <div className="flex flex-col items-end gap-2 shrink-0">
+                                            {/* X 버튼 */}
+                                            <button
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    handleDeleteDet(item.detection_id);
+                                                }}
+                                                disabled={deletingDetId === item.detection_id}
+                                                className={`w-7 h-7 rounded-full flex items-center justify-center transition
+      ${deletingDetId === item.detection_id
+                                                    ? 'bg-gray-100 text-black cursor-wait'
+                                                    : 'bg-white text-black hover:bg-gray-100 border border-gray-200'}
+    `}
+                                                title="삭제"
+                                            >
+                                                {deletingDetId === item.detection_id ? (
+                                                    <Loader2 className="animate-spin" size={14} />
+                                                ) : (
+                                                    <span className="text-[18px] leading-none font-semibold text-black" aria-hidden>×</span>
+                                                )}
+                                            </button>
+
+                                            {/* 날짜 */}
+                                            <span className="text-[10px] text-gray-400">
+    {safeDate(item.created_at)}
+  </span>
+
+                                            {/* Detected / No WM (날짜 아래로 이동) */}
+                                            <span
+                                                className={`px-2 py-0.5 text-[9px] font-bold rounded-full border ${
+                                                    detected
+                                                        ? 'bg-green-50 text-green-700 border-green-200'
+                                                        : 'bg-red-50 text-red-700 border-red-200'
+                                                }`}
+                                            >
+    {detected ? 'Detected' : 'No WM'}
+  </span>
                                         </div>
+
                                     </div>
-                                    <p className="text-xs text-gray-600 line-clamp-2 leading-relaxed mb-3">{item.input_text_preview}</p>
+
+                                    <p className="text-xs text-gray-600 line-clamp-2 leading-relaxed mb-3">
+                                        {item.input_text_preview}
+                                    </p>
+
                                     <div className="pt-2 border-t border-gray-50 flex justify-between items-end">
                                         <span className="text-[9px] font-bold text-gray-400 uppercase tracking-wide">Confidence</span>
                                         <span className="text-sm font-black text-gray-800">{confPct}%</span>
@@ -722,10 +914,10 @@ export default function HistoryPage() {
                                     {selectedItem.type === 'generation' ? 'Generation Details' : 'Detection Analysis Report'}
                                 </h3>
                                 <span className="text-sm text-gray-500 ml-10 mt-1">
-                                    ID: {selectedItem.type === 'generation' ? selectedItem.generation_id : selectedItem.detection_id}
+                  ID: {selectedItem.type === 'generation' ? selectedItem.generation_id : selectedItem.detection_id}
                                     <span className="mx-2">|</span>
                                     {safeDate(selectedItem.created_at)}
-                                </span>
+                </span>
                             </div>
 
                             <button
@@ -736,7 +928,7 @@ export default function HistoryPage() {
                             </button>
                         </div>
 
-                        <div className="p-10 overflow-y-auto bg-white flex-1">
+                        <div className="p-10 overflow-y-auto bg-white flex-1 min-h-0">
                             {isModalLoading ? (
                                 <div className="h-full flex flex-col items-center justify-center gap-4 text-gray-400">
                                     <Loader2 size={48} className="animate-spin text-indigo-500" />

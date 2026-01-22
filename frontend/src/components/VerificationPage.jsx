@@ -4,7 +4,7 @@ import {
     FileText, BarChart3, Activity, CheckCircle2, XCircle,
     Cpu, Calendar, ArrowLeft,
     Thermometer, Zap, Layers, Microscope, Hash,
-    Loader2, TrendingUp, AlertTriangle
+    Loader2, TrendingUp, AlertTriangle, X
 } from 'lucide-react';
 import { apiRequest } from '../utils/api';
 
@@ -28,6 +28,42 @@ export default function VerificationPage({ onAnalyzeComplete }) {
 
     // 🔒 결과 생겨도 화면 점프/자동 스크롤 방지(필요 시 확장용)
     const shouldAutoScrollRef = useRef(false);
+
+    const [deletingId, setDeletingId] = useState(null);
+
+    // ✅ 단일 항목 삭제
+    const handleDelete = async (id) => {
+        const ok = window.confirm("삭제하시겠습니까?");
+        if (!ok) return;
+
+        setDeletingId(id);
+        try {
+            await apiRequest(`/api/generations/${id}`, { method: "DELETE" });
+
+            // 리스트에서 제거
+            setGenerationList((prev) => prev.filter((x) => x.generation_id !== id));
+            // total 감소
+            setTotalItems((t) => Math.max(0, t - 1));
+            // 캐시 제거
+            setOutputPreviewMap((prev) => {
+                const next = { ...prev };
+                delete next[id];
+                return next;
+            });
+
+            // (선택) 상세 보고 있던 거 삭제한 경우 목록으로
+            if (selectedItem?.id === id) {
+                setSelectedItem(null);
+                setAnalyzeResult(null);
+                setViewMode('list');
+            }
+        } catch (e) {
+            console.error(e);
+            alert("삭제 실패");
+        } finally {
+            setDeletingId(null);
+        }
+    };
 
     // ✅ 미리보기 생성 (AI 답변 기반)
     const makePreview = (text, max = 160) => {
@@ -277,24 +313,60 @@ export default function VerificationPage({ onAnalyzeComplete }) {
                                     className={`bg-white rounded-2xl p-6 shadow-sm hover:shadow-lg cursor-pointer transition-all duration-300 group flex flex-col gap-3 border border-gray-100 hover:border-indigo-200 hover:-translate-y-1 ${isLoadingDetail ? 'cursor-wait opacity-70' : ''}`}
                                 >
                                     <div className="flex justify-between items-start">
-                                        <div className="flex items-center gap-2">
-                      <span className="px-2.5 py-1 bg-gray-100 text-gray-600 text-[10px] font-bold rounded-full uppercase tracking-wider border border-gray-200">
-                        ID: {item.generation_id}
-                      </span>
+                                        {/* 왼쪽: ID / ATTACK / WM */}
+                                        <div className="flex flex-wrap items-center gap-2">
+    <span className="px-2.5 py-1 bg-gray-100 text-gray-600 text-[10px] font-bold rounded-full border border-gray-200">
+      ID: {item.generation_id}
+    </span>
+
+                                            {item.attack_type && (
+                                                <span className="px-2 py-0.5 bg-red-50 text-red-600 text-[10px] font-bold rounded-full border border-red-100 flex items-center gap-1">
+        <AlertTriangle size={10} /> {String(item.attack_type).toUpperCase()}
+      </span>
+                                            )}
+
                                             {item.watermark_enabled ? (
                                                 <span className="px-2 py-0.5 bg-indigo-50 text-indigo-600 text-[10px] font-bold rounded-full border border-indigo-100 flex items-center gap-1">
-                          <CheckCircle2 size={10} /> WM ON
-                        </span>
+        <CheckCircle2 size={10} /> WM ON
+      </span>
                                             ) : (
                                                 <span className="px-2 py-0.5 bg-gray-50 text-gray-400 text-[10px] font-bold rounded-full border border-gray-200 flex items-center gap-1">
-                          <XCircle size={10} /> WM OFF
-                        </span>
+        <XCircle size={10} /> WM OFF
+      </span>
                                             )}
                                         </div>
-                                        <span className="text-[11px] text-gray-400 flex items-center gap-1.5 font-medium">
-                      <Calendar size={12} /> {new Date(item.created_at).toLocaleDateString()}
-                    </span>
+
+                                        {/* 오른쪽: X + 날짜 (항상 고정) */}
+                                        <div className="flex flex-col items-end gap-2 shrink-0">
+                                            <button
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    handleDelete(item.generation_id);
+                                                }}
+                                                disabled={deletingId === item.generation_id}
+                                                className={`w-7 h-7 rounded-full flex items-center justify-center transition border border-gray-200
+    ${deletingId === item.generation_id
+                                                    ? 'bg-gray-100 text-gray-500 cursor-wait'
+                                                    : 'bg-white text-gray-900 hover:bg-gray-100'}
+  `}
+                                                title="삭제"
+                                            >
+                                                {deletingId === item.generation_id ? (
+                                                    <Loader2 className="animate-spin text-gray-700" size={14} />
+                                                ) : (
+                                                    <span className="text-lg leading-none font-black">×</span>
+                                                )}
+                                            </button>
+
+
+
+                                            <span className="text-[11px] text-gray-400 flex items-center gap-1.5 font-medium">
+      <Calendar size={12} /> {new Date(item.created_at).toLocaleDateString()}
+    </span>
+                                        </div>
                                     </div>
+
+
 
                                     <div className="flex-1 pt-1">
                                         <h4 className="text-[15px] font-bold text-gray-800 mb-2 line-clamp-1 group-hover:text-indigo-600 transition-colors">
@@ -312,7 +384,7 @@ export default function VerificationPage({ onAnalyzeComplete }) {
                       <Cpu size={14} className="text-gray-400" /> {item.model}
                     </span>
                                         <span className="text-indigo-600 text-xs font-bold flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-all translate-x-[-10px] group-hover:translate-x-0">
-                      검증하기 <ChevronRight size={14} />
+                      검증 <ChevronRight size={14} />
                     </span>
                                     </div>
                                 </div>
