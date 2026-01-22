@@ -4,14 +4,14 @@ import {
     CheckCircle, AlertTriangle, X,
     Loader2, ChevronLeft, ChevronRight,
     Cpu, Zap, Settings2, BarChart3, CheckCircle2, XCircle,
-    TrendingUp, User, MessageSquare
+    TrendingUp, User, MessageSquare, Trash2
 } from 'lucide-react';
 import { apiRequest } from '../utils/api'; // 경로는 실제 프로젝트에 맞게 확인해주세요.
 
 const PAGE_SIZE = 10;
 
 // 필터 옵션 상수
-const MODEL_OPTIONS = ['Llama-3-8B', 'Gemma-2-2B'];
+const MODEL_OPTIONS = ['meta-llama/Meta-Llama-3-8B-Instruct', 'google/gemma-2-2b-it'];
 const ATTACK_TYPES = ['substitution', 'deletion', 'summarization'];
 
 // --- [유틸리티 함수] ---
@@ -116,6 +116,7 @@ export default function HistoryPage() {
     const [genPage, setGenPage] = useState(1);
     const [genTotal, setGenTotal] = useState(0);
     const [isLoadingGen, setIsLoadingGen] = useState(false);
+    const [refreshGen, setRefreshGen] = useState(0); // 리스트 새로고침 트리거
 
     // --- [Right Panel] 검증(Detection) 상태 ---
     const [detSearchTerm, setDetSearchTerm] = useState('');
@@ -172,7 +173,7 @@ export default function HistoryPage() {
             }
         };
         fetchGenList();
-    }, [genPage, genSort, genModel, genWatermark, genType, genAttackType]);
+    }, [genPage, genSort, genModel, genWatermark, genType, genAttackType, refreshGen]);
 
     // 2) [API 호출] 검증 이력
     useEffect(() => {
@@ -370,6 +371,29 @@ export default function HistoryPage() {
                         {data.output_text}
                     </div>
                 </div>
+                
+                {data.type === 'generation' && (
+                     <div className="flex justify-end">
+                        <button 
+                            onClick={async () => {
+                                if(window.confirm("정말로 삭제하시겠습니까? 관련 데이터도 함께 삭제될 수 있습니다.")) {
+                                    try {
+                                        await apiRequest(`/api/generations/${data.generation_id}`, { method: 'DELETE' });
+                                        alert("삭제되었습니다.");
+                                        setSelectedItem(null);
+                                        // 리스트 갱신 (트리거)
+                                        setRefreshGen(n => n + 1);
+                                    } catch(e) {
+                                        alert("삭제 실패: " + e.message);
+                                    }
+                                }
+                            }}
+                            className="bg-red-50 hover:bg-red-100 text-red-600 px-4 py-2 rounded-xl font-bold text-sm transition-colors flex items-center gap-2"
+                        >
+                            <Trash2 size={16} /> Delete Record
+                        </button>
+                     </div>
+                )}
             </div>
         </div>
     );

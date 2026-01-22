@@ -13,13 +13,17 @@ export const apiRequest = async (endpoint, options = {}) => {
         });
 
         // 3. 응답 받기
-        const data = await response.json();
+        let data = null;
+        const contentType = response.headers.get("content-type");
+        if (contentType && contentType.indexOf("application/json") !== -1) {
+             data = await response.json();
+        }
 
         // 4. [핵심] 에러 처리 로직
         if (!response.ok) {
             // 백엔드가 준 에러 구조: { error: { message: "..." } }
             // 여기서 message를 뽑아냅니다.
-            const errorMessage = data.error?.message || `서버 요청 실패 (${response.status})`;
+            const errorMessage = data?.error?.message || `서버 요청 실패 (${response.status})`;
 
             // 에러를 던지면 컴포넌트의 catch 블록으로 이동합니다.
             throw new Error(errorMessage);
