@@ -22,8 +22,8 @@ jobs:
           cd backend
           
           # 'sw' user is in docker group, so sudo is not needed
-          docker-compose down
-          docker-compose up -d --build
+          docker compose down
+          docker compose up -d --build
           
           echo "Cleaning up unused images..."
           docker image prune -f
