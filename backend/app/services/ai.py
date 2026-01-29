@@ -10,7 +10,7 @@ from app.core.llm import llm_manager
 
 # Default Constants
 DEFAULT_NGRAM_LEN = 5
-DEFAULT_SAMPLING_TABLE_SIZE = 65536
+DEFAULT_SAMPLING_TABLE_SIZE = 65536 * 4  # Increased to 262144 to safely cover Llama-3 vocab (128k)
 DEFAULT_SAMPLING_TABLE_SEED = 0
 DEFAULT_CONTEXT_HISTORY_SIZE = 1024
 DEFAULT_DEPTH = 3 
@@ -23,25 +23,67 @@ def _get_keys(key_seed: int, depth: int) -> Sequence[int]:
     return [int(x) for x in rng.randint(0, 2**30, size=depth).tolist()] # Using 30 to stay safe? logits_processor takes Sequence[int] and converts to tensor.
 
 async def generate_text(input_text: str, params: Dict[str, Any]) -> str:
-    model_name = params.get("model", "google/gemma-2b-it") 
+    raw_model_name = params.get("model", "google/gemma-2b-it")
+    
+    # Model Name Mapping (Frontend shortname -> HuggingFace ID)
+    MODEL_MAPPING = {
+        "Llama-3-8B": "meta-llama/Meta-Llama-3-8B-Instruct",
+        "Gemma-2-2B": "google/gemma-2b-it",
+    }
+    model_name = MODEL_MAPPING.get(raw_model_name, raw_model_name)
     
     # Load Model
     model, tokenizer = llm_manager.get_model(model_name)
     device = model.device
     
     # Prepare Inputs
-    input_ids = tokenizer.encode(input_text, return_tensors="pt").to(device)
+    # Use Chat Template for Llama-3-Instruct or compatible models
+    # Added "gemma" and "it" to cover Gemma-2-2B-IT
+    if any(keyword in model_name.lower() for keyword in ["instruct", "chat", "llama-3", "gemma", "it"]):
+        messages = [
+            {"role": "user", "content": f"다음 질문에 대해 반드시 한국어로 답변해줘: {input_text}"},
+        ]
+        # Some models don't support system prompts well in their template, so we force it in the user prompt for Gemma/Others
+        if "llama-3" in model_name.lower():
+             messages = [
+                {"role": "system", "content": "You are a helpful assistant. Please always answer in Korean."},
+                {"role": "user", "content": input_text},
+            ]
+        
+        input_ids = tokenizer.apply_chat_template(
+            messages, 
+            add_generation_prompt=True, 
+            return_tensors="pt"
+        ).to(device)
+    else:
+        # Fallback: append Korean instruction to raw text
+        prompt = f"{input_text}\n\n(한국어로 답변해주세요)"
+        input_ids = tokenizer.encode(prompt, return_tensors="pt").to(device)
+
+    # Attention Mask (Important for Llama 3)
+    attention_mask = torch.ones_like(input_ids).to(device)
     
     # Generation Config
     max_tokens = params.get("max_tokens") or 100
-    temperature = params.get("temperature") or 1.0
+    temperature = params.get("temperature") or 0.7
     top_k = params.get("top_k") or 40
-    top_p = params.get("top_p")
+    top_p = params.get("top_p") or 0.9
+
+    # Define terminators for Llama 3
+    terminators = [tokenizer.eos_token_id]
+    
+    # Llama 3 uses <|eot_id|> to end turns
+    eot_id = tokenizer.convert_tokens_to_ids("<|eot_id|>")
+    if isinstance(eot_id, int):
+        terminators.append(eot_id)
     
     gen_kwargs = {
         "max_new_tokens": max_tokens,
         "temperature": temperature,
         "do_sample": True,
+        "pad_token_id": tokenizer.eos_token_id,
+        "eos_token_id": terminators,
+        "attention_mask": attention_mask,
     }
     if top_k: gen_kwargs["top_k"] = top_k
     if top_p: gen_kwargs["top_p"] = top_p
@@ -62,56 +104,20 @@ async def generate_text(input_text: str, params: Dict[str, Any]) -> str:
         # Custom wrapper to match HuggingFace LogitsProcessor API
         class HFWrapper(logits_processing.SynthIDLogitsProcessor):
             def __call__(self, input_ids: torch.LongTensor, scores: torch.FloatTensor) -> torch.FloatTensor:
-                # SynthID's watermarked_call returns (updated_scores, top_k_indices, original_scores)
-                # But HF expects just scores. 
-                # Also watermarked_call does top-k internally?
+                # Cast to float32 for stability during watermark calculation
+                original_dtype = scores.dtype
+                scores_f32 = scores.to(torch.float32)
                 
-                # We need to adapt the signatures.
-                # SynthID implementation raises NotImplementedError on __call__ 
-                # requiring us to use watermarked_call.
-                
-                # Check logits_processing.py: watermarked_call(self, input_ids, scores)
-                # returns: updated_scores, top_k_indices, scores_top_k
-                
-                # The updated_scores are [batch_size, top_k].
-                # We need to map them back to [batch_size, vocab_size] if possible,
-                # OR we just implement __call__ to do what watermarked_call does but return full size?
-                # Actually, SynthID logic is designed to work on Top-K only to be efficient?
-                
-                # Wait, if we return only top-k scores, HF generation might be confused if it expects vocab size.
-                # But let's look at how watermarking works. It boosts green tokens.
-                
-                updated_scores_top_k, top_k_indices, _ = self.watermarked_call(input_ids, scores)
+                # watermarked_call logic (SynthID)
+                updated_scores_top_k, top_k_indices, _ = self.watermarked_call(input_ids, scores_f32)
                 
                 # We need to scatter these back to the full vocabulary scores.
-                # Initialize with original scores (or -inf if we forced top-k)
-                # If we want to strictly follow the watermark decisions, we should probably ONLY allow top-k?
-                
-                # Let's create a new score tensor same shape as scores
-                # We can copy 'scores' (input) and then update the specific indices.
-                
-                # Note: 'updated_scores_top_k' are the modified LOGITS for the top-k tokens.
-                
-                # scatter_ requires src and index to have same dimensionality?
-                # output = scores.clone()
-                # output.scatter_(1, top_k_indices, updated_scores_top_k)
-                # return output
-                
-                # However, watermarked_call applies temperature and top-k logic internally.
-                # If we use it as a LogitsProcessor in HF, HF might also apply temp/top-k later?
-                # HF 'LogitsProcessor' is usually applied BEFORE sampling (Temperature, TopK, TopP).
-                
-                # SynthID's processor acts as both a sampler-preparer and watermarker.
-                # If we use it in HF pipeline, we might be double-processing if we are not careful.
-                # But for now, let's just make it runnable.
-                
-                new_scores = scores.clone()
-                # We only update the top-k indices that SynthID modified.
-                # Ideally we should probably set everything else to -inf if SynthID "selected" top-k?
-                # But let's just update the ones it touched to preserve the watermark bias.
-                
+                # Initialize with -inf so that only the top_k indices are selectable
+                new_scores = torch.full_like(scores_f32, -float('inf'))
                 new_scores.scatter_(1, top_k_indices, updated_scores_top_k)
-                return new_scores
+                
+                # Cast back to original dtype (e.g., float16)
+                return new_scores.to(original_dtype)
 
         processor = HFWrapper(
             ngram_len=DEFAULT_NGRAM_LEN,
@@ -119,7 +125,7 @@ async def generate_text(input_text: str, params: Dict[str, Any]) -> str:
             sampling_table_size=DEFAULT_SAMPLING_TABLE_SIZE,
             sampling_table_seed=DEFAULT_SAMPLING_TABLE_SEED,
             context_history_size=DEFAULT_CONTEXT_HISTORY_SIZE,
-            temperature=float(temperature),
+            temperature=1.0, # Pass 1.0 to avoid double temperature scaling if SynthID applies it internally
             top_k=int(top_k),
             device=device,
         )
@@ -170,7 +176,15 @@ async def attack_text(text: str, attack_type: str, intensity: float) -> str:
 
 
 async def detect_text(text: str, watermark_key: Optional[str], params: Dict[str, Any]) -> Dict[str, Any]:
-    model_name = params.get("model", "google/gemma-2b-it")
+    raw_model_name = params.get("model", "google/gemma-2b-it")
+    
+    # Model Name Mapping (Frontend shortname -> HuggingFace ID)
+    MODEL_MAPPING = {
+        "Llama-3-8B": "meta-llama/Meta-Llama-3-8B-Instruct",
+        "Gemma-2-2B": "google/gemma-2b-it",
+    }
+    model_name = MODEL_MAPPING.get(raw_model_name, raw_model_name)
+
     model, tokenizer = llm_manager.get_model(model_name)
     device = model.device
     
